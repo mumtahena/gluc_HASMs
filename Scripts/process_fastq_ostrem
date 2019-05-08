@@ -1,0 +1,49 @@
+#!/bin/bash
+
+set -o errexit
+inputDir="/data-working-fs0/rostrom/FastQ"
+#for f in $inputDir/*.txt
+#do
+ #echo "Applying FastQC for quality checks on "$f
+# sampleID=${f/\.txt/.fastq}
+# echo $sampleID
+# mv $f $sampleID
+ #  /data-working-fs0/Softwares/FastQC/fastqc -o /data-working-fs0/FeatureCounts $f
+
+#done
+
+#cat $inputDir/4R117-L?-P01-ATCACG-Sequences.fastq  > $inputDir/4R117-P01-ATCACG-Sequences.fastq
+#for f in $inputDir/*.fastq 
+#do
+#  sampleID=$(basename $f)
+#  sampleID=${sampleID/\.fastq/}
+#  echo "Processing" $sampleID
+#  echo "${f%/*}"
+  outDir="/data-working-fs0/rostrom/FeatureCounts"
+#  mkdir -p $outDir  
+#  tempDir="/data-working-fs0/InProgress"
+#  mkdir -p $tempDir
+#echo $outDir/$sampleID.featurecounts
+  
+#  if [ -f $outDir/$sampleID.featurecounts ]
+#  then
+#  echo $sampleID already processed
+#  continue
+#  fi
+
+#  if [ -f $tempDir/$sampleID.tmp ]
+#  then
+#   echo $sampleID currently being processed
+#   continue
+# fi
+
+# Rscript --vanilla /data-working-fs0/Pipelines/RNA_Seq/ProcessRnaSeqFeatureCounts.R /data-working-fs0/Pipelines/ref_seq_hg38/hg38.fa $f NULL NULL $tempDir/$sampleID.tmp $outDir/$sampleID.fpkm $outDir/$sampleID.tpm $outDir/$sampleID.featurecounts  $outDir/$sampleID.stats
+
+#done
+Rscript --vanilla /data-working-fs0/Pipelines/RNA_Seq/rostrem_buildMatrix.R $outDir/featurecounts *.featurecounts $outDir/Matrices/Gs_HASM.featurecounts_1
+Rscript --vanilla /data-working-fs0/Pipelines/RNA_Seq/rostrem_buildMatrix.R $outDir/tpm *.tpm $outDir/Matrices/Gs_HASM.tpm_1
+Rscript --vanilla /data-working-fs0/Pipelines/RNA_Seq/rostrem_buildMatrix.R $outDir/fpkm *.fpkm $outDir/Matrices/Gs_HASM.fpkm_1
+Rscript --vanilla /data-working-fs0/Pipelines/RNA_Seq/ConvertID_2_Symbol.R $outDir/Matrices/Gs_HASM.featurecounts_1 $outDir/Matrices/Gs_HASM.featurecounts_1_symbol
+Rscript --vanilla /data-working-fs0/Pipelines/RNA_Seq/ConvertID_2_Symbol.R $outDir/Matrices/Gs_HASM.fpkm_1 $outDir/Matrices/Gs_HASM.fpkm_1_symbol
+Rscript --vanilla /data-working-fs0/Pipelines/RNA_Seq/ConvertID_2_Symbol.R $outDir/Matrices/Gs_HASM.tpm_1 $outDir/Matrices/Gs_HASM.tpm_1_symbol
+
