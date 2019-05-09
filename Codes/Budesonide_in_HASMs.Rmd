@@ -1,0 +1,319 @@
+---
+title: "Budesonide Induced Transcriptional Activity in HASMs"
+output:
+  html_document: default
+  pdf_document: default
+---
+This repository contains the scripts for generating the RNA-Seq data analysis for "Corticosteroids activate Gs and cAMP production via a rapid non-genomic mechanism that contributes to a subset of the canonical genomic effects." Goal of this document is to validate the GNAS(Gs) knockdown and to identify differentially expressed genes due to budesonide treatment for each experimental condition. We processed the single end Illumina reads that are 100 bp long with Rsubread, an open source R package. The gene counts are used to identify the differentially expressed genes with DESeq package.
+
+
+```{r, cache=TRUE,echo=FALSE,include=FALSE}
+# if (!requireNamespace("BiocManager", quietly = TRUE))
+#     install.packages("BiocManager")
+# BiocManager::install("DESeq2")
+library(DESeq2)
+library(data.table)
+library(gplots)
+library(ggplot2)
+library(stats)
+library(tibble)
+# if (!requireNamespace("BiocManager", quietly = TRUE))
+#     install.packages("BiocManager")
+# BiocManager::install("fgsea")
+library(fgsea)
+# if (!requireNamespace("BiocManager", quietly = TRUE))
+#     install.packages("BiocManager")
+# BiocManager::install("sva")
+library(sva)
+# if (!requireNamespace("BiocManager", quietly = TRUE))
+#     install.packages("BiocManager")
+# #BiocManager::install("ASSIGN")
+devtools::install_github("compbiomed/ASSIGN")
+library(ASSIGN)
+library(VennDiagram)
+library(pheatmap)
+
+###curated pathway dataset downloaded from msigdb
+all_geneSets<-gmtPathways("~/Desktop/Glucocorticoids-bioinformatics/Matrices/msigdb.v6.2.symbols.gmt.txt")
+
+c2 <- gmtPathways("~/Desktop/Glucocorticoids-bioinformatics/Matrices/c2.cp.kegg.v6.2.symbols.gmt.txt")#KEGG pathways
+
+c5<- gmtPathways("~/Desktop/Glucocorticoids-bioinformatics/Matrices/c5.all.v6.2.symbols.gmt.txt")#gene ontology gene sets
+
+###function for gsea results
+fgsea_analysis<-function(dat,pathways=c2,dge=T){
+  if(dge){
+    res<-deframe(cbind(rownames(dat),dat[4]))
+  }
+  else{
+    res<-deframe(dat)
+  }
+  fgseaRes <- fgsea(pathways, stats=res, nperm=10000, maxSize = 500)
+  topPathwaysUp <- fgseaRes[ES > 0][head(order(pval), n=10), ]
+  topPathwaysDown <- fgseaRes[ES < 0][head(order(pval), n=10), ]
+  topPathways <- c(topPathwaysUp, rev(topPathwaysDown))
+  topPathways
+  plotGseaTable(pathways[topPathways$pathway], res, fgseaRes, gseaParam = 0.5)
+}
+
+pcaplot<-function(mat,sub,center=T,scale=T){
+  if(sum(sub)!=length(mat)){
+    print("verify the subscripts...exiting now")
+  }
+  else{
+    pca_mat <- prcomp(t(mat), center=center,scale=scale)
+    plot(pca_mat)
+    plot(pca_mat$x[,1],pca_mat$x[,2])
+    abline(h=0,v=0)
+    for(i in length(sub):1){
+      print(i)
+      if(i!=1){
+        points(pca_mat$x[sum(sub[1:i-1]):sum(sub[1:i])],pca_mat$x[sum(sub[1:i-1]):sum(sub[1:i]),2],col=i,pch=i)
+      }
+      else{
+        points(pca_mat$x[1:sub[i]],pca_mat$x[1:sub[i],2],col=i,pch=i)
+      }
+    }
+  }
+}
+```
+
+## Getting the datasets ready for differential gene expression analysis
+```{r,cache=TRUE}
+featureCounts<-as.matrix(read.table("~/Desktop/Glucocorticoids-bioinformatics/Matrices/Matrices/Gs_HASM.featurecounts_1_symbol.txt", sep='\t', stringsAsFactors=FALSE, header=1, row.names=1))
+#Filtering gene that has counts less than 100 for 50% of the samples
+featureCounts_f1<-featureCounts[apply(featureCounts[,1:24]>100,1,mean) >=0.5,]
+pts<-c(1,5,9,13,17,21)
+contr<-subset(featureCounts_f1,select=pts)
+contr_budesonide<-subset(featureCounts_f1,select=(pts+1))
+gs_kd<-subset(featureCounts_f1,select=(pts+2))
+gs_kd_budesonide<-subset(featureCounts_f1,select=(pts+3))
+condition<- factor(c(rep("contr",6),rep("contr_budesonide",6),rep("gs_kd",6),rep("gs_kd_budesonide",6)))
+
+
+hasm_de<-function(data, condition, FCCutOff=1, padjCutOff=0.001,pathways=c2,dge=T){
+
+  hasm_dds <- DESeqDataSetFromMatrix(countData =data,DataFrame(condition), design= ~condition)
+  hasm_dds <- DESeq(hasm_dds)
+  res <- data.frame(results(hasm_dds, contrast =c("condition",levels(condition))))
+  plotMA(hasm_dds)
+  de<-na.exclude(res)
+  fgsea_analysis(res, pathways,dge)
+  de<-de[(abs(de$log2FoldChange)>FCCutOff),]
+  de<-de[(de$padj<padjCutOff),]
+  de_ord<-de[order(de$log2FoldChange,decreasing = 0),]
+  boxplot(data[rownames(de_ord)[1],]~condition,ylab="FeatureCounts",main=paste(rownames(de_ord)[1], "log2FC =", de_ord[1,2]))
+  return(de_ord)
+}
+```
+
+## Differential gene expression analysis for all four treatment conditions
+```{r,cache=TRUE,include=FALSE}
+condition1<-factor(c(rep("contr",6),rep("gs_kd",6)))
+hasm_de_c1<-hasm_de(data=cbind(contr,gs_kd),condition1)# validation of GNAS knockdown in control samples
+
+condition2<-factor(c(rep("budesonide",6),rep("gs_kd_budesonide",6)))
+hasm_de_c2<-hasm_de(data=cbind(contr_budesonide,gs_kd_budesonide),condition2)# validation of GNAS knockdown in budesonide treated samples
+
+condition3<-factor(c(rep("contr",6),rep("budesonide",6)))
+hasm_de_c3<-hasm_de(data=cbind(contr,contr_budesonide),condition3,padjCutOff = 0.001,pathways = c2)
+hasm_de_c3$cont_mean<-apply(contr[rownames(hasm_de_c3),],1,mean)
+hasm_de_c3$budesonide_mean<-apply(contr_budesonide[rownames(hasm_de_c3),],1,mean)
+#write.table(hasm_de_c3,"~/Desktop/Glucocorticoids-bioinformatics/050719/budesonide_gen_nongen_DE.txt",sep="\t",quote = F,col.names = NA)
+
+condition4<-factor(c(rep("gs_kd",6),rep("gs_kd_budesonide",6)))
+hasm_de_c4<-hasm_de(data=cbind(gs_kd,gs_kd_budesonide),condition4,padjCutOff = 0.001, pathways = c2)
+hasm_de_c4$cont_mean<-apply(gs_kd[rownames(hasm_de_c4),],1,mean)
+hasm_de_c4$budesonide_mean<-apply(gs_kd_budesonide[rownames(hasm_de_c4),],1,mean)
+#write.table(hasm_de_c4,"~/Desktop/Glucocorticoids-bioinformatics/050719/budesonide_gen_DE.txt",sep="\t",quote = F,col.names = NA)
+
+#dev.off()
+
+```
+## GSEA across KEGG and GO gene sets
+```{r,cache=TRUE,include=FALSE}
+fgsea_against_all<-function(data,dge=T){
+  fgsea_analysis(data,pathways =c2,dge)#kegg
+   fgsea_analysis(data,pathways =c5,dge)#GO
+}
+fgsea_against_all(hasm_de_c3)
+fgsea_against_all(hasm_de_c4)
+```
+## Checking batch effects across patients and conditions
+```{r,cache=TRUE}
+tpm<-as.matrix(log2(read.table("~/Desktop/Glucocorticoids-bioinformatics/Matrices/Matrices/Gs_HASM.tpm_1_symbol.txt", sep='\t', stringsAsFactors=FALSE, header=1, row.names=1)+1))
+tpm_f1<-tpm[rownames(tpm)%in%rownames(featureCounts_f1),]
+conditions<-c(rep(c("cont","cont_bud","GNAS_kd","GNAS_kd_bud"),6))
+
+for(i in 1:nrow(hasm_de_c1)){
+  boxplot(t(as.data.frame(tpm)[row.names(hasm_de_c1)[i],])~conditions, main=row.names(hasm_de_c1)[i],ylab="Log2 TPM Count",ylim=c(0,12))
+}
+for(i in 1:nrow(hasm_de_c2)){
+  boxplot(t(as.data.frame(tpm)[row.names(hasm_de_c2)[i],])~conditions, main=row.names(hasm_de_c2)[i],ylab="Log2 TPM Count",ylim=c(0,12))
+
+}
+#checking patient specific effect
+require(graphics)
+pca_mat <- prcomp(t(tpm_f1))
+plot(pca_mat)
+plot(pca_mat$x[,1],pca_mat$x[,2], main="Top 2 PCs in 6 Pts", pch=2,col=2)
+abline(h=0,v=0)
+points(pca_mat$x[1:4,1],pca_mat$x[1:4,2],col=2, pch=2,lwd=3)
+points(pca_mat$x[5:8,1],pca_mat$x[5:8,2],col=3, pch=2,lwd=3)
+points(pca_mat$x[9:12,1],pca_mat$x[9:12,2],col=4, pch=2,lwd=3)
+points(pca_mat$x[13:16,1],pca_mat$x[13:16,2],col=5, pch=2,lwd=3)
+points(pca_mat$x[17:20,1],pca_mat$x[17:20,2],col=6, pch=2,lwd=3)
+points(pca_mat$x[21:24,1],pca_mat$x[21:24,2],col=7, pch=2,lwd=3)
+legend(18,-6,legend=c("Pt_1", "Pt_2", "Pt_3","Pt_4", "Pt_5","Pt_6"), col=c(2:7), pch = 2,pt.lwd = 3)
+
+patients<-c(rep("Pt1",4),rep("Pt2",4),rep("Pt3",4),rep("Pt4",4),rep("Pt5",4),rep("Pt6",4))
+boxplot(pca_mat$x[,1]~patients)
+boxplot(pca_mat$x[,2]~patients)
+boxplot(pca_mat$x[,3]~patients)#patient specific variation
+boxplot(pca_mat$x[,4]~patients)
+boxplot(pca_mat$x[,5]~patients)
+
+#checking condition specific effect
+
+plot(pca_mat)
+plot(pca_mat$x[,1],pca_mat$x[,2], main="Top 2 PCs across\n Tx Conditions")
+abline(h=0,v=0)
+c_i<-c(1,5,9,13,17,21)
+points(pca_mat$x[c_i,1],pca_mat$x[c_i,2],col=2, lwd=3)
+points(pca_mat$x[c_i+1,1],pca_mat$x[c_i+1,2],col=3, lwd=3)
+points(pca_mat$x[c_i+2,1],pca_mat$x[c_i+2,2],col=4, lwd=3)
+points(pca_mat$x[c_i+3,1],pca_mat$x[c_i+3,2],col=5, lwd=3)
+legend(11,-13,legend=c("contrl", "contrl+budesonide", "GNAS-kd","GNAS-kd+budesonide"), col=c(2,3,4,5), pch = 1,pt.lwd = 3)
+
+
+contr_t<-subset(tpm_f1,select=pts)
+contr_budesonide_t<-subset(tpm_f1,select=(pts+1))
+gs_kd_t<-subset(tpm_f1,select=(pts+2))
+gs_kd_budesonide_t<-subset(tpm_f1,select=(pts+3))
+
+tpm<-cbind(contr_t, contr_budesonide_t,gs_kd_t,gs_kd_budesonide_t)
+pca_mat <- prcomp(t(tpm))
+boxplot(pca_mat$x[,1]~conditions)
+boxplot(pca_mat$x[,2]~conditions)
+boxplot(pca_mat$x[,3]~conditions)
+boxplot(pca_mat$x[,4]~conditions)
+boxplot(pca_mat$x[,5]~conditions)
+
+```
+## Creating Budesonide signatures with differentially expressed gene list using ASSIGN and predicting budesonide transcriptional activity
+```{r,eval=FALSE, include=FALSE,cache=TRUE,}
+set.seed(040319)
+assign.wrapper(trainingData = cbind(contr_t,contr_budesonide_t), testData=cbind(contr_t,contr_budesonide_t,gs_kd_t,gs_kd_budesonide_t), trainingLabel=list(control=list(budesonide=1:6),budesonide=7:12),
+  testLabel = NULL, geneList = list(rownames(hasm_de_c3)), anchorGenes = NULL,
+  excludeGenes = NULL, n_sigGene = NA, adaptive_B = TRUE,
+  adaptive_S = FALSE, mixture_beta = TRUE, outputDir="~/Desktop/Glucocorticoids-bioinformatics/050719/budesonide_nogen_gen_de_140", p_beta = 0.01,
+  theta0 = 0.05, theta1 = 0.9, iter = 100000, burn_in = 1000,
+  sigma_sZero = 0.01, sigma_sNonZero = 1, S_zeroPrior = FALSE,
+  pctUp = 0.5, geneselect_iter = 500, geneselect_burn_in = 100,
+  outputSignature_convergence = FALSE, ECM = FALSE,
+  progress_bar = TRUE, override_S_matrix = NULL)
+
+set.seed(040319)
+assign.wrapper(trainingData = cbind(gs_kd_t,gs_kd_budesonide_t), testData=cbind(contr_t,contr_budesonide_t,gs_kd_t,gs_kd_budesonide_t), trainingLabel=list(control=list(budesonide=1:6),budesonide=7:12),
+  testLabel = NULL, geneList = list(rownames(hasm_de_c4)), anchorGenes = NULL,
+  excludeGenes = NULL, n_sigGene = NA, adaptive_B = TRUE,
+  adaptive_S = FALSE, mixture_beta = TRUE, outputDir="~/Desktop/Glucocorticoids-bioinformatics/050719/budesonide_gen_de_121", p_beta = 0.01,
+  theta0 = 0.05, theta1 = 0.9, iter = 100000, burn_in = 1000,
+  sigma_sZero = 0.01, sigma_sNonZero = 1, S_zeroPrior = FALSE,
+  pctUp = 0.5, geneselect_iter = 500, geneselect_burn_in = 100,
+  outputSignature_convergence = FALSE, ECM = FALSE,
+  progress_bar = TRUE, override_S_matrix = NULL)
+
+venn.diagram(list(Budesonide=rownames(hasm_de_c3),Budesonide_Gs=rownames(hasm_de_c4)),filename = NULL,col = "transparent",fill = c("cornflowerblue", "green"),alpha = 0.20,cex = 2.5,cat.cex = 2.5,cat.pos = c(-15, 15) )
+
+#venn.diagram(list(Budesonide=rownames(hasm_de_c3),Budesonide_Gs=rownames(hasm_de_c4)),filename = "~/Desktop/Glucocorticoids-bioinformatics/050719/140_121_budesonide_genes.png",col = "transparent",fill = c("cornflowerblue", "green"),alpha = 0.20,cex = 2.5,cat.cex = 2.5,cat.pos = c(-15, 15) )
+
+#write.table(merge(hasm_de_c3,read.csv("~/Desktop/Glucocorticoids-bioinformatics/050719/budesonide_nogen_gen_de_140/signature_gene_list_prior.csv"),by.x=0, by.y=1),"~/Desktop/Glucocorticoids-bioinformatics/050719/budesonide_gen_nongen_DE_ASSIGN.txt",sep="\t",quote = F,col.names = NA)
+#write.table(merge(hasm_de_c4,read.csv("~/Desktop/Glucocorticoids-bioinformatics/050719/budesonide_gen_de_121/signature_gene_list_prior.csv"),by.x=0, by.y=1),"~/Desktop/Glucocorticoids-bioinformatics/050719/budesonide_gen_DE_ASSIGN.txt",sep="\t",quote = F,col.names = NA)
+
+```
+## Compare Himes et al 2014 PlosOne DGE 
+```{r,cache=T,echo=FALSE}
+##https://journals.plos.org/plosone/article?id=10.1371/journal.pone.0099625 Expression validation of DE genes from this study
+  pr_dge<-read.csv("~/Desktop/Glucocorticoids-bioinformatics/de_lu_et_al.csv")
+  rownames(pr_dge)<-pr_dge$Gene
+   input<-list(bud_gen_nongen=rownames(hasm_de_c3),bud_gen=rownames(hasm_de_c4))
+  inter<-attr(venn(input, show.plot = T),"intersections")
+
+#venn.diagram(list(Budesonide=rownames(hasm_de_c3),Budesonide_Gs=rownames(hasm_de_c4),Himes_et_al=pr_dge$Gene),filename = NULL,col = "transparent",fill = c("cornflowerblue", "green", "yellow"),alpha = 0.20,cex = 2.5,cat.cex = 2.5,cat.pos = c(-15, 15, 30) )
+
+#function that compares genomic, genomic+non genomic budesonide DGE and creates a output pdf
+# set colors for heatmap
+my_palette <- colorRampPalette(c("darkblue","aliceblue","brown4"))(n = 299)
+col_breaks = c(seq(0,0.2,length=100), seq(0.2,0.4,length=100), seq(0.4,1,length=100)) 
+
+compare_dge_himes<-function(file1,file2,outPdf){
+  budesonide_alone_gene_list<-read.csv(file1)
+  fgsea_against_all(budesonide_alone_gene_list,dge=F)
+  budesonide_kd_gene_list<-read.csv(file2)
+  fgsea_against_all(budesonide_kd_gene_list,dge=F)
+
+  pdf(outPdf)
+  input<-list(bud_gen_nongen=rownames(hasm_de_c3),bud_gen=rownames(hasm_de_c4))
+  inter<-attr(venn(input, show.plot = T),"intersections")
+  for(i in 1: length(inter)){
+    print(i)
+    gene_expression<-tpm[inter[[i]][(inter[[i]]%in%rownames(tpm))],]
+    heatmap.2(gene_expression, col = my_palette, main=names(inter)[i], trace ="none" ,density.info = "none",cexCol = .5)
+    print(cor(pca_mat$x[,1:5],apply(gene_expression,2,mean),method = "spearman"))
+    print(paste("Number of genes in",names(inter)[i],"is",nrow(gene_expression),sep=" "))
+  }
+  
+  dev.off()
+  return(tpm[inter[[3]][(inter[[3]]%in%rownames(tpm))],])
+}
+
+## Investigating signatures
+
+#cc <- c(rep("lightblue",6),rep("orange",6),rep("blue",6),rep("red",6))
+
+input_dge<-list(bud_gen_nongen=rownames(hasm_de_c3),bud_gen=rownames(hasm_de_c4))
+inter<-attr(venn(input_dge, show.plot = T),"intersections")
+cc <- c(rep(c("lightblue","orange","blue","red"),6))
+
+ 
+gene_expression<-tpm_f1[inter[[1]],]
+my_sample_col <- data.frame(budesonide=c(rep(c("No","Yes"),12)),condition = rep(c("Control","Control","Gs-knockdown", "Gs-knockdown"),6), patient=c(rep("P1",4),rep("P2",4),rep("P3",4),rep("P4",4),rep("P5",4),rep("P6",4)))
+row.names(my_sample_col) <- colnames(gene_expression)
+
+pheatmap(gene_expression,cutree_cols = 2,annotation_col = my_sample_col,show_colnames = F,scale = "row",fontsize=15,cutree_rows = 2)
+save_pheatmap_png <- function(x, filename, width=3000, height=3000, res = 300) {
+  png(filename, width = width, height = height, res = res)
+  grid::grid.newpage()
+  grid::grid.draw(x$gtable)
+  dev.off()
+}
+#heat_object<-pheatmap(gene_expression,cutree_cols = 2,annotation_col = my_sample_col,show_colnames = F,scale = "row",fontsize=15,cutree_rows = 2)
+#save_pheatmap_png(heat_object,"~/Desktop/Glucocorticoids-bioinformatics/050719/48_non_genomic.png")
+```
+##Correlation analysis of predicted budesonide activity from control and Gs-knockdown signatures
+```{r, cache=TRUE, echo=FALSE}
+pred_bud_con<-read.csv("~/Desktop/Glucocorticoids-bioinformatics/050719/budesonide_nogen_gen_de_140/pathway_activity_testset.csv")
+pred_bud_gs_kd<-read.csv("~/Desktop/Glucocorticoids-bioinformatics/050719/budesonide_gen_de_121/pathway_activity_testset.csv")
+plot(pred_bud_con$V1,pred_bud_gs_kd$V1,ylab="Gs_knockdown budesonide signature ",xlab="Control budesonide signature",main="Signature Predicted Budesonide \nActivity; Pearson's Cor =0.9977")
+points(pred_bud_con$V1[1:6],pred_bud_gs_kd$V1[1:6],col=2)
+points(pred_bud_con$V1[7:12],pred_bud_gs_kd$V1[7:12],col=3)
+points(pred_bud_con$V1[13:18],pred_bud_gs_kd$V1[13:18],col=4)
+points(pred_bud_con$V1[19:24],pred_bud_gs_kd$V1[19:24],col=6)
+legend(0.5,0.5,legend=c("contrl", "contrl+budesonide", "GNAS-kd","GNAS-kd+budesonide"), col=c(2,3,4,6),pch = 1)
+
+t.test(read.csv("~/Desktop/Glucocorticoids-bioinformatics/050719/budesonide_nogen_gen_de_140/pathway_activity_testset.csv")[,2],read.csv("~/Desktop/Glucocorticoids-bioinformatics/050719/budesonide_gen_de_121/pathway_activity_testset.csv")[,2])
+cor.test(read.csv("~/Desktop/Glucocorticoids-bioinformatics/050719/budesonide_nogen_gen_de_140/pathway_activity_testset.csv")[,2],read.csv("~/Desktop/Glucocorticoids-bioinformatics/050719/budesonide_gen_de_121/pathway_activity_testset.csv")[,2],method = "pearson")
+
+
+
+#write.table(read.csv("~/Desktop/Glucocorticoids-bioinformatics/050719/budesonide_nogen_gen_de_140/signature_gene_list_prior.csv")[read.csv("~/Desktop/Glucocorticoids-bioinformatics/050719/budesonide_nogen_gen_de_140/signature_gene_list_prior.csv")$X%in%inter[[1]],],"~/Desktop/Glucocorticoids-bioinformatics/050719/bud_nongen_gen_only_48.txt",sep = "\t",col.names = NA,quote = F)
+#write.table(read.csv("~/Desktop/Glucocorticoids-bioinformatics/050719/budesonide_gen_de_121/signature_gene_list_prior.csv")[read.csv("~/Desktop/Glucocorticoids-bioinformatics/050719/budesonide_gen_de_121/signature_gene_list_prior.csv")$X%in%inter[[3]],],"~/Desktop/Glucocorticoids-bioinformatics/050719/bud_gen_only_29.txt",sep = "\t",col.names = NA,quote = F)
+#write.table(read.csv("~/Desktop/Glucocorticoids-bioinformatics/050719/budesonide_nogen_gen_de_140/signature_gene_list_prior.csv")[read.csv("~/Desktop/Glucocorticoids-bioinformatics/050719/budesonide_nogen_gen_de_140/signature_gene_list_prior.csv")$X%in%inter[[2]],],"~/Desktop/Glucocorticoids-bioinformatics/050719/bud_common_92.txt",sep = "\t",col.names = NA,quote = F)
+```
+
+```{r echo=FALSE}
+time<-format(Sys.time(),"%a %b %d %X %Y")
+```
+This analysis was run on `r time` 
+
