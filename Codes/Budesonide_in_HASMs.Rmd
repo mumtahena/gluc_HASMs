@@ -34,11 +34,11 @@ library(VennDiagram)
 library(pheatmap)
 
 ###curated pathway dataset downloaded from msigdb
-all_geneSets<-gmtPathways("~/Desktop/Glucocorticoids-bioinformatics/Matrices/msigdb.v6.2.symbols.gmt.txt")
+all_geneSets<-gmtPathways("~/Dropbox (Chapman)/Glucocorticoids-bioinformatics/Matrices/msigdb.v6.2.symbols.gmt.txt")
 
-c2 <- gmtPathways("~/Desktop/Glucocorticoids-bioinformatics/Matrices/c2.cp.kegg.v6.2.symbols.gmt.txt")#KEGG pathways
+c2 <- gmtPathways("~/Dropbox (Chapman)/Glucocorticoids-bioinformatics/Matrices/c2.cp.kegg.v6.2.symbols.gmt.txt")#KEGG pathways
 
-c5<- gmtPathways("~/Desktop/Glucocorticoids-bioinformatics/Matrices/c5.all.v6.2.symbols.gmt.txt")#gene ontology gene sets
+c5<- gmtPathways("~/Dropbox (Chapman)/Glucocorticoids-bioinformatics/Matrices/c5.all.v6.2.symbols.gmt.txt")#gene ontology gene sets
 
 ###function for gsea results
 fgsea_analysis<-function(dat,pathways=c2,dge=T){
@@ -76,11 +76,16 @@ pcaplot<-function(mat,sub,center=T,scale=T){
     }
   }
 }
+merge_drop<-function(x,y,by=0,...){
+  new_m<-merge(x,y,by=by,...)
+  rownames(new_m)<-new_m$Row.names
+  return(new_m[,2:length(colnames(new_m))])
+}
 ```
 
 ## Getting the datasets ready for differential gene expression analysis
 ```{r,cache=TRUE}
-featureCounts<-as.matrix(read.table("~/Desktop/Glucocorticoids-bioinformatics/Matrices/Matrices/Gs_HASM.featurecounts_1_symbol.txt", sep='\t', stringsAsFactors=FALSE, header=1, row.names=1))
+featureCounts<-as.matrix(read.table("~/Dropbox (Chapman)/Glucocorticoids-bioinformatics/Matrices/Matrices/Gs_HASM.featurecounts_1_symbol.txt", sep='\t', stringsAsFactors=FALSE, header=1, row.names=1))
 #Filtering gene that has counts less than 100 for 50% of the samples
 featureCounts_f1<-featureCounts[apply(featureCounts[,1:24]>100,1,mean) >=0.5,]
 pts<-c(1,5,9,13,17,21)
@@ -141,7 +146,7 @@ fgsea_against_all(hasm_de_c4)
 ```
 ## Checking batch effects across patients and conditions
 ```{r,cache=TRUE}
-tpm<-as.matrix(log2(read.table("~/Desktop/Glucocorticoids-bioinformatics/Matrices/Matrices/Gs_HASM.tpm_1_symbol.txt", sep='\t', stringsAsFactors=FALSE, header=1, row.names=1)+1))
+tpm<-as.matrix(log2(read.table("~/Dropbox (Chapman)/Glucocorticoids-bioinformatics/Matrices/Matrices/Gs_HASM.tpm_1_symbol.txt", sep='\t', stringsAsFactors=FALSE, header=1, row.names=1)+1))
 tpm_f1<-tpm[rownames(tpm)%in%rownames(featureCounts_f1),]
 conditions<-c(rep(c("cont","cont_bud","GNAS_kd","GNAS_kd_bud"),6))
 
@@ -234,6 +239,47 @@ venn.diagram(list(Budesonide=rownames(hasm_de_c3),Budesonide_Gs=rownames(hasm_de
 ```
 ## Compare Himes et al 2014 PlosOne DGE 
 ```{r,cache=T,echo=FALSE}
+himes_19<-read.delim("~/Dropbox (Chapman)/Glucocorticoids-bioinformatics/Himes_2019/himes_19_gene_symbol.tpm_log",sep = "\t")
+rownames(himes_19)<-himes_19$X
+himes_19<-himes_19[,2:ncol(himes_19)]
+head(himes_19)
+
+set.seed(040319)
+assign.wrapper(trainingData = cbind(contr_t,contr_budesonide_t), testData=himes_19, trainingLabel=list(control=list(budesonide=1:6),budesonide=7:12),
+  testLabel = NULL, geneList = list(rownames(hasm_de_c3)), anchorGenes = NULL,
+  excludeGenes = NULL, n_sigGene = NA, adaptive_B = TRUE,
+  adaptive_S = FALSE, mixture_beta = TRUE, outputDir="~/Desktop/himes_19/himes_budesonide_nogen_gen_de_140", p_beta = 0.01,
+  theta0 = 0.05, theta1 = 0.9, iter = 100000, burn_in = 1000,
+  sigma_sZero = 0.01, sigma_sNonZero = 1, S_zeroPrior = FALSE,
+  pctUp = 0.5, geneselect_iter = 500, geneselect_burn_in = 100,
+  outputSignature_convergence = FALSE, ECM = FALSE,
+  progress_bar = TRUE, override_S_matrix = NULL)
+
+
+
+set.seed(040319)
+assign.wrapper(trainingData = cbind(gs_kd_t,gs_kd_budesonide_t), testData=himes_19, trainingLabel=list(control=list(budesonide=1:6),budesonide=7:12),
+  testLabel = NULL, geneList = list(rownames(hasm_de_c4)), anchorGenes = NULL,
+  excludeGenes = NULL, n_sigGene = NA, adaptive_B = TRUE,
+  adaptive_S = FALSE, mixture_beta = TRUE, outputDir="~/Desktop/himes_19/himes_budesonide_gen_de_121", p_beta = 0.01,
+  theta0 = 0.05, theta1 = 0.9, iter = 100000, burn_in = 1000,
+  sigma_sZero = 0.01, sigma_sNonZero = 1, S_zeroPrior = FALSE,
+  pctUp = 0.5, geneselect_iter = 500, geneselect_burn_in = 100,
+  outputSignature_convergence = FALSE, ECM = FALSE,
+  progress_bar = TRUE, override_S_matrix = NULL)
+sample_map_himes<- read.csv("~/Desktop/himes_19/himes_sample_map.csv")
+himes_budesonide_nogen_gen_de_140<-read.csv("~/Desktop/himes_19/himes_budesonide_nogen_gen_de_140/pathway_activity_testset.csv")
+himes_budesonide_gen_de_121<-read.csv("~/Desktop/himes_19/himes_budesonide_gen_de_121/pathway_activity_testset.csv")
+himes_budesonide_nogen_gen_de_140$X<-gsub(himes_budesonide_nogen_gen_de_140$X,pattern = ".tpm_log",replacement = "")
+himes_budesonide_gen_de_121$X<-gsub(himes_budesonide_gen_de_121$X,pattern = ".tpm_log",replacement = "")
+
+himes_preds<-data.frame(merge(himes_budesonide_nogen_gen_de_140,himes_budesonide_gen_de_121,by="X"),row.names = himes_budesonide_nogen_gen_de_140$X)
+himes_preds<-subset(himes_preds,select=c(2,3))
+colnames(himes_preds)=c("himes_budesonide_nogen_gen_de_140","himes_budesonide_gen_de_121")
+cor.test(himes_preds$himes_budesonide_gen_de_121,himes_preds$himes_budesonide_nogen_gen_de_140,method = "pearson")
+himes_pred_char<-merge_drop(himes_preds,sample_map_himes,by.x=0, by.y=4)
+write.table(himes_pred_char,"~/Desktop/himes_19/himes_pred_char.txt",sep="\t",quote = F, col.names = NA)
+
 ##https://journals.plos.org/plosone/article?id=10.1371/journal.pone.0099625 Expression validation of DE genes from this study
   pr_dge<-read.csv("~/Desktop/Glucocorticoids-bioinformatics/de_lu_et_al.csv")
   rownames(pr_dge)<-pr_dge$Gene
